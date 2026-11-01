@@ -1,7 +1,8 @@
 # LG IPK Download
 
 A command-line tool that downloads the latest official IPK for any LG Content
-Store app. You don't need to install the app on your TV first.
+Store app, in any store region, without installing the app on your TV first.
+NCG-protected apps are decrypted automatically after download.
 
 **More webOS tools:** [IPTV Player](https://github.com/lennylxx/webos-iptv-player) · [DevMode Forever](https://github.com/lennylxx/lg-devmode-forever) · [GeoLock Bypass](https://github.com/lennylxx/lg-geolock-bypass)
 
@@ -10,6 +11,12 @@ Store app. You don't need to install the app on your TV first.
 > because the private palmbus, device-bound SDX authentication, and the
 > short-lived signed package URL are only available there. Sensitive headers and
 > signed URL parameters never leave the TV.
+
+> [!TIP]
+> You don't need to change your TV's region to download apps from another
+> country's store: `--country` takes care of it. If you already changed
+> regions and got stuck, use
+> [lg-geolock-bypass](https://github.com/lennylxx/lg-geolock-bypass).
 
 ## Requirements
 
@@ -90,6 +97,9 @@ Search runs on LG's servers and may include related apps.
     --timeout <seconds>   Download timeout (default: 180)
     --keep-remote         Keep the downloaded file on the TV
     --force               Replace an existing output file
+    --no-decrypt          Skip the automatic NCG decryption after download
+    --fetch-cek           If no CEK is cached, run one live RO exchange to
+                          obtain it and retry the decryption
     --json                Print the final result as JSON
 -h, --help                Show this help
 ```
@@ -125,6 +135,81 @@ are accepted, but store and app availability depend on the region and TV model.
 | `EC` | Ecuador | `MX` | Mexico | `VN` | Vietnam |
 | `ES` | Spain | `MY` | Malaysia | `ZA` | South Africa |
 
+## NCG-protected apps
+
+Some store apps ship their payload files (`index.html`, `*.js`, ...) encrypted
+with LG's **NCG** content protection. Those IPKs do not work in Developer Mode
+as-is. This repository includes offline tooling to decrypt them and repack the
+IPK so it installs with `ares-install`.
+
+The download command decrypts automatically: once a CEK for the app is cached,
+every download also writes a decrypted, installable copy next to the original
+(`<name>.ipk` -> `<name>_dec.ipk`). Without a cached CEK the encrypted IPK is
+kept and the tool prints how to obtain one. `--no-decrypt` skips the step.
+
+With `--fetch-cek`, a missing CEK is obtained during the download itself: one
+live RO exchange (the same call `ncg/fetch-cek.js` makes) runs on your TV,
+the CEK is cached, and the decryption is retried. Each exchange is a real
+request to LG's service — keep it rare. The exchange looks the app's license
+up in the TV's current store region; if the app only exists in another
+region's store, pass `--country <code>` (the download command forwards its own
+`--country` to the exchange).
+
+```bash
+# one-time: cache the app's CEK. One command (TV-native exchange: the TV's own
+# libncg_agent.so in a single node process, SDX headers never leave the TV):
+#   ncg/build.sh          # once, needs docker
+#   node ncg/fetch-cek.js --app-id com.example.foo --ipk com.example.foo_1.2.3.ipk
+node ncg/ncg-decrypt.js cache add \
+  --app-id com.example.foo --sid 50000001 \
+  --cid 00112233445566778899AABBCCDDEEFF \
+  --cek-b64 '<from the RO response>' --date 2026-10-30
+
+# then every download is decrypted automatically:
+./bin/lg-ipk-download.js --device tv com.example.foo
+# -> com.example.foo_1.2.3.ipk and com.example.foo_1.2.3_dec.ipk
+
+# or decrypt manually / later, e.g. right after the CEK gets cached:
+node ncg/ncg-decrypt.js decrypt-ipk \
+  com.example.foo_1.2.3.ipk --out /tmp/com.example.foo_1.2.3_dec.ipk \
+  --app-id com.example.foo
+
+# install from your computer (do not launch the app from the store)
+ares-install /tmp/com.example.foo_1.2.3_dec.ipk --device tv
+```
+
+The CEK is deterministic per app build and cached under `cache/ncg/`
+(gitignored), so repeated work needs no TV or LG access. Keep right object
+exchanges rare — frequent requests risk the device being blocked. Details:
+[ncg/README.md](ncg/README.md), the RO protocol
+([ro-protocol.md](docs/ro-protocol.md)), and the NCG format and payload
+algorithm ([ncg-format.md](docs/ncg-format.md)).
+
+### Supported webOS versions
+
+The TV-side toolchain (the N-API addon from `ncg/ncg_native.c` and
+`tv/ro-exchange.js`) needs the TV's Node.js to ship Node-API. Every
+"verified" row below was tested in QEMU-user against a real TV firmware
+rootfs, running the TV's own `libncg_agent` (no LG server access required).
+Note that LG's firmware updates bump the TV's Node.js within a marketing
+generation — one 2023 model ran node 12.22.2 in its 03.31.82 build, 16.19.1
+in 23.25.55, and 16.20.2 in 33.31.75 — so the table lists the Node.js range
+actually seen per generation.
+
+| webOS | Year | TV Node.js | Status |
+|-------|------|------------|--------|
+| 4.x and earlier | 2015–2019 | 0.10 / 0.12 | ❌ Not supported — predates Node-API |
+| 5.0 | 2020 | 8.12.0 | ✅ Verified (2020 UP8000 firmware 03.53.45) |
+| 6.0 | 2021 | 12.22.2 – 16.20.2 | ✅ Verified across a 2021 model's firmware lifecycle: 03.31.82 (12.22.2), 23.25.55 (16.19.1), 33.31.75 (16.20.2) |
+| 22 | 2022 | 12.21.0 / 12.22.2 | ✅ Verified (13.30.85, node v12.22.2; an earlier build of the generation ships 12.21.0) |
+| 23 | 2023 | 12.22.2 / 16.19.1 | ✅ Verified (23.25.55, node v16.19.1; the generation's 12.22.2 build is the same Node.js verified for webOS 22) |
+| 24 | 2024 | 16.19.1 | ✅ Verified (2024 C4 firmware 03.11.20, webOS TV 9.1.0, node v16.19.1) |
+| 25 | 2025 | 16.20.2 | ✅ Verified (33.31.61 and 33.31.75 firmwares, plus a live RO exchange on a webOS 25 TV) |
+| 26 | 2026 | 20.12.2 | ✅ Verified (43.21.62 firmware) |
+
+The offline half (`ncg/ncg-decrypt.js`) runs on the Node.js of your computer
+and has no webOS version dependency.
+
 ## How it works
 
 ### On the computer
@@ -135,9 +220,13 @@ are accepted, but store and app availability depend on the region and TV model.
 3. Push `tv/download-ipk.js` to a unique path under `/tmp`.
 4. Run the helper over SSH.
 5. Pull the completed IPK with SCP.
-6. Check the file size against the size reported by LG, and compute the
-   SHA-256.
-7. Remove the temporary helper from the TV. The TV copy of the IPK is also
+6. Check the file size against the size reported by LG, and compute the SHA-256.
+7. If the IPK contains NCG-encrypted files and a CEK for the app is cached,
+   decrypt them and write `<name>_dec.ipk` next to the original
+   (skipped with `--no-decrypt`; without a cached CEK the encrypted IPK is
+   kept and a hint is printed, unless `--fetch-cek` runs one live RO
+   exchange and retries).
+8. Remove the temporary helper from the TV. The TV copy of the IPK is also
    removed unless `--keep-remote` is used.
 
 ### On the TV
@@ -161,8 +250,8 @@ are accepted, but store and app availability depend on the region and TV model.
    luna://com.webos.service.sdx/getHttpHeaderForServiceRequest
    ```
 
-   This returns the device-bound Content Store request headers and the
-   regional SDP host.
+   This returns the device-bound Content Store request headers and the regional
+   SDP host.
 
 4. Query the app detail endpoint:
 
@@ -192,8 +281,8 @@ are accepted, but store and app availability depend on the region and TV model.
    directly to a temporary file on the TV.
 
 The install metadata response contains the current package version, the
-expected packed size, and a short-lived signed GFTS URL. The helper keeps that
-URL in memory only.
+expected packed size, and a short-lived signed GFTS URL. The helper keeps
+that URL in memory only.
 
 ## Temporary directories
 
@@ -233,22 +322,5 @@ SCP, the IPK is removed from the TV unless `--keep-remote` is specified.
 - The default API version, `10.0.0`, was verified on an OLED77C5PUA running
   webOS 10.3.1 (firmware 33.31.69).
 - Use `--api-version` when targeting a different SDP API generation.
-- LG may change private services, authentication requirements, or SDP
-  response formats in future firmware.
-
-## Development
-
-Run syntax checks:
-
-```bash
-npm run check
-bash -n lib/tv.sh
-```
-
-Repository layout:
-
-```text
-bin/lg-ipk-download.js  Host CLI and verification
-lib/tv.sh               SSH/SCP transport
-tv/download-ipk.js      Temporary TV-side helper
-```
+- LG may change private services, authentication requirements, or SDP response
+  formats in future firmware.

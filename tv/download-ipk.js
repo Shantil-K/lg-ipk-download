@@ -303,7 +303,8 @@ function searchApps(hostname, basePath, headers, keyword, callback) {
           if (expanded) {
             callback(new Error('SDP search returned incomplete app results'));
           } else {
-            // Offset pages can overlap, so retrieve all keyword matches in one window.
+            // Offset pages can overlap, so retrieve all keyword matches in
+            // one window.
             fetchResults(total, true);
           }
           return;

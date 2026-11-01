@@ -7,7 +7,7 @@
     "lg-ipk-download": "bin/lg-ipk-download.js"
   },
   "scripts": {
-    "check": "node --check bin/lg-ipk-download.js && node --check tv/download-ipk.js"
+    "check": "set -e; for f in bin/*.js tv/*.js ncg/*.js; do node --check \"$f\"; done"
   },
   "license": "Apache-2.0"
 }

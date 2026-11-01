@@ -1,3 +1,5 @@
 *.ipk
 *.partial-*
 node_modules/
+cache/
+ncg/dist/
