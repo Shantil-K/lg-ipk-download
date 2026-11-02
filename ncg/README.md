@@ -19,12 +19,12 @@ Once, per app content id (needs a live TV + one LG request; see
 # on the TV in a single node process against the TV's own libncg_agent.so
 # (headers never leave the TV), and the CEK is cached locally.
 # Source checkouts only: ncg/build.sh (requires Docker; npm includes the addon).
-ncg-fetch-cek --app-id com.example.foo --ipk com.example.foo_1.2.3.ipk
+lg-ipk fetch-cek --app-id com.example.foo --ipk com.example.foo_1.2.3.ipk
 ```
 
 The exchange looks the app's license up in the TV's current store region; if
 the app only exists in another region's store, add `--country <cc>` (e.g.
-`--country CN`) to the `fetch-cek.js` line.
+`--country CN`) to the `lg-ipk fetch-cek` command.
 
 The RO response is plain XML or DH-encrypted depending on the app; `<cek>`
 is 44 base64 chars -> 32 bytes, and the driver prints it in its JSON line
@@ -33,7 +33,7 @@ is 44 base64 chars -> 32 bytes, and the driver prints it in its JSON line
 If you already have a CEK value, cache it without any exchange:
 
 ```bash
-ncg-decrypt cache add \
+lg-ipk cache add \
   --app-id com.example.foo --sid 50000001 \
   --cid 00112233445566778899AABBCCDDEEFF \
   --cek-b64 '<base64 from the RO response>' \
@@ -47,8 +47,8 @@ After that, everything is offline:
 # The output is verified before the command reports success: valid ar/tar
 # structure, zero NCG files left, and every member that was not replaced is
 # byte-identical to the input.
-ncg-decrypt decrypt-ipk \
-  com.example.foo_1.2.3.ipk --out /tmp/com.example.foo_1.2.3_dec.ipk \
+lg-ipk decrypt \
+  com.example.foo_1.2.3.ipk --output /tmp/com.example.foo_1.2.3_dec.ipk \
   --app-id com.example.foo
 
 # Install from your computer (Developer Mode) and do NOT launch it from
@@ -56,10 +56,11 @@ ncg-decrypt decrypt-ipk \
 ares-install /tmp/com.example.foo_1.2.3_dec.ipk --device tv
 ```
 
-`decrypt-file` handles a single NCG file:
+The same command handles a single NCG file, detecting the format from its
+contents rather than its filename:
 
 ```bash
-ncg-decrypt decrypt-file index.html.ncg --out index.html
+lg-ipk decrypt index.html.ncg --output index.html
 # key/iv come from the cache by cid; --key/--iv hex override the cache
 ```
 

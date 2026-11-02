@@ -1,7 +1,20 @@
 {
-  "name": "lg-ipk-download",
+  "name": "lg-ipk",
   "version": "0.1.0",
   "description": "Download IPKs from the LG Content Store in any country on your computer, with automatic NCG decryption",
+  "keywords": [
+    "lg",
+    "webos",
+    "ipk",
+    "lg-content-store",
+    "smart-tv",
+    "ncg",
+    "cli",
+    "download",
+    "search",
+    "decrypt",
+    "cek"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/lennylxx/lg-ipk-download.git"
@@ -20,9 +33,7 @@
     "ncg/dist/ncg_native.node"
   ],
   "bin": {
-    "lg-ipk-download": "bin/lg-ipk-download.js",
-    "ncg-decrypt": "ncg/ncg-decrypt.js",
-    "ncg-fetch-cek": "ncg/fetch-cek.js"
+    "lg-ipk": "bin/lg-ipk.js"
   },
   "scripts": {
     "check": "bash scripts/check.sh",

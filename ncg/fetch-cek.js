@@ -17,7 +17,7 @@
 //      against the pushed NCG file through the library itself
 //   4. capture the CEK from the driver's JSON line (host side; fallback:
 //      the TV library log /var/log/ncgdrm-*.log)
-//   5. cache the CEK locally (node ncg/ncg-decrypt.js)
+//   5. cache the CEK locally (lg-ipk cache add)
 //   6. clean up /tmp/ncgrow on the TV (it is also wiped on reboot)
 //
 // Prerequisites: ares-setup-device + expect (same as lib/tv.sh), and a
@@ -25,21 +25,23 @@
 //   ncg/build.sh
 //
 // Usage:
-//   node ncg/fetch-cek.js --app-id com.foo.bar \
-//     --ipk com.foo.bar_1.0.0.ipk \
-//     [--version 1.0.0]        # probe version (default: from IPK control)
-//     [--sid <rsid>]           # skip applicense lookup, use this sid
-//     [--ro-url <url>]         # skip applicense lookup, use this URL
-//     [--country <cc>]         # store region for the applicense lookup
-//                              # (default: the TV's current region)
-//     [--device <profile>]     # ares-setup-device profile (default device)
-//     [--device-id <mac>]      # override the eth0 MAC the driver reads
-//     [--skip-cache]           # print the CEK, do not `cache add`
-//     [--keep-remote]          # leave /tmp/ncgrow on the TV
+//   lg-ipk fetch-cek --app-id <id> --ipk <file> [options]
+//
+// Options:
+//       --version <version>   App version (default: from IPK control)
+//       --sid <sid>           Skip the applicense lookup and use this SID
+//       --ro-url <url>        Skip the applicense lookup and use this RO URL
+//       --country <code>      Store region for the applicense lookup
+//                             (default: the TV's current region)
+//       --device <profile>    ares-setup-device profile (default device)
+//       --device-id <mac>     Override the TV's eth0 MAC read by the driver
+//       --skip-cache          Print the CEK without caching it
+//       --keep-remote         Leave /tmp/ncgrow on the TV
+//   -h, --help                Show this help
 //
 // Keep this rare: repeated RO requests from one device risk the device being
 // blocked by LG. Once the CEK is cached, everything is offline
-// (node ncg/ncg-decrypt.js decrypt-ipk).
+// (lg-ipk decrypt).
 'use strict';
 
 const childProcess = require('child_process');
@@ -48,7 +50,9 @@ const os = require('os');
 const path = require('path');
 const zlib = require('zlib');
 
-const m = require(path.join(__dirname, 'ncg-decrypt.js'));
+const m = require('./ncg-decrypt');
+const cache = require('./cache');
+const parseOptions = require('../lib/parse-options');
 
 const ROOT = path.resolve(__dirname, '..');
 const TV = path.join(ROOT, 'lib', 'tv.sh');
@@ -59,6 +63,19 @@ const WORK = '/tmp/ncgrow';
 const DRIVER = 'tv/ro-exchange.js';
 const ADDON = 'ncg/dist/ncg_native.node';
 
+const USAGE = `Usage: lg-ipk fetch-cek --app-id <id> --ipk <file> [options]
+
+Options:
+      --version <version>   App version (default: from IPK control)
+      --sid <sid>           Skip the applicense lookup and use this SID
+      --ro-url <url>        Skip the applicense lookup and use this RO URL
+      --country <code>      Store region (default: the TV's current region)
+      --device <profile>    ares-setup-device profile (default device)
+      --device-id <mac>     Override the TV's eth0 MAC
+      --skip-cache          Print the CEK without caching it
+      --keep-remote         Leave temporary files on the TV
+  -h, --help                Show this help`;
+
 function today() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` +
@@ -66,48 +83,41 @@ function today() {
 }
 
 function parseCli(argv) {
-  const bools = { '--skip-cache': false, '--keep-remote': false };
-  const args = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const key = argv[i];
-    if (key in bools) { bools[key] = true; continue; }
-    i += 1;
-    args[key] = argv[i];
+  const { options: args, positional } = parseOptions(argv, {
+    values: ['app-id', 'ipk', 'version', 'sid', 'ro-url', 'country', 'device', 'device-id'],
+    flags: ['skip-cache', 'keep-remote']
+  });
+  if (positional.length) {
+    throw { usage: true, message: `unexpected argument: ${positional[0]}` };
   }
-  const app = args['--app-id'] || '';
-  const ipk = args['--ipk'] || '';
+  const app = args['app-id'] || '';
+  const ipk = args.ipk || '';
   if (!app || !ipk)
     throw { usage: true,
-            message: 'usage: ncg-fetch-cek --app-id <id> --ipk <encrypted.ipk> [options]' };
-  let country = args['--country'] || '';
+            message: USAGE };
+  let country = args.country || '';
   if (country) {
     if (!/^(?:[A-Za-z]{2}|C01)$/i.test(country))
       throw { usage: true,
-              message: 'error: --country must be a two-letter code such as US, DE, or CN' };
+              message: '--country must be a two-letter code such as US, DE, or CN' };
     country = country.toUpperCase();
     if (country === 'C01') country = 'CN';
   }
   return {
     app, ipk,
-    version: args['--version'] || '',
-    sid: args['--sid'] || '',
-    roUrl: args['--ro-url'] || '',
-    deviceId: args['--device-id'] || '',
-    deviceProfile: args['--device'] || '',
+    version: args.version || '',
+    sid: args.sid || '',
+    roUrl: args['ro-url'] || '',
+    deviceId: args['device-id'] || '',
+    deviceProfile: args.device || '',
     country,
-    doCache: !bools['--skip-cache'],
-    keepRemote: bools['--keep-remote']
+    doCache: !args['skip-cache'],
+    keepRemote: Boolean(args['keep-remote'])
   };
 }
 
-function main() {
-  let cli;
-  try {
-    cli = parseCli(process.argv.slice(2));
-  } catch (err) {
-    process.stderr.write(`${err.message}\n`);
-    process.exit(err.usage ? 2 : 1);
-  }
+function run(argv) {
+  const cli = parseCli(argv);
   const { app, ipk, deviceId, deviceProfile, roUrl, keepRemote, country } = cli;
   let { version, sid, doCache } = cli;
   if (!fs.existsSync(ipk)) {
@@ -120,7 +130,7 @@ function main() {
   }
 
   const env = Object.assign({}, process.env);
-  if (env.NCG_CACHE_DIR) env.NCG_CACHE_DIR = m.defaultCacheDir();
+  if (env.NCG_CACHE_DIR) env.NCG_CACHE_DIR = cache.defaultCacheDir();
   if (deviceProfile) env.TV_DEVICE = deviceProfile;
 
   function tv(...args) {
@@ -280,7 +290,7 @@ function main() {
       process.stdout.write('\n== cache the CEK locally (offline from now on)\n');
       const date = today();
       const r = childProcess.spawnSync(process.execPath,
-        [path.join(__dirname, 'ncg-decrypt.js'), 'cache', 'add',
+        [path.join(ROOT, 'bin', 'lg-ipk.js'), 'cache', 'add',
          '--app-id', app, '--sid', sid, '--cid', cid, '--cek-b64', cekB64,
          '--source', `TV-native exchange ${date}`, '--date', date],
         { cwd: ROOT, env, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
@@ -298,7 +308,7 @@ function main() {
     fs.rmSync(pickDir, { recursive: true, force: true });
     cleanupRemote();
     process.stdout.write(`done. sid=${sid} cid=${cid} app=${app}\n`);
-    process.stdout.write(`next: ncg-decrypt decrypt-ipk ${ipk} --out <out> --app-id ${app}\n`);
+    process.stdout.write(`next: lg-ipk decrypt ${ipk} --output <path> --app-id ${app}\n`);
   } catch (err) {
     if (err && err.usage) {
       process.stderr.write(`${err.message}\n`);
@@ -309,4 +319,8 @@ function main() {
   }
 }
 
-main();
+module.exports = { help: `${USAGE}\n`, run };
+
+if (require.main === module) {
+  require('../bin/lg-ipk').run(['fetch-cek', ...process.argv.slice(2)]);
+}

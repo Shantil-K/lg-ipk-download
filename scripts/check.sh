@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-for file in bin/*.js tv/*.js ncg/*.js test/*.js; do
+for file in bin/*.js lib/*.js tv/*.js ncg/*.js test/*.js; do
   node --check "$file"
 done
 

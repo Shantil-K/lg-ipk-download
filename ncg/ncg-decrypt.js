@@ -9,25 +9,19 @@
 // offline. It needs the CEK once per content id (cid); the CEK is obtained with
 // the RO exchange (see docs/ro-protocol.md) and cached in the user's home.
 //
-// Key material derivation (verified on webOS 25 firmware,
-// libncg_agent.so.2.0.0; see docs/ncg-format.md):
+// Both single-file and IPK decryption verify their output before reporting
+// success: the result must no longer be NCG, and for IPKs the repack is
+// re-checked end to end (valid ar/tar structure, zero NCG members left, every
+// member that was not replaced byte-identical to the input).
 //
-//     cek     = base64decode(<cek> from the RO response)   // 32 bytes
-//     aes_key = cek[0:16]                                   // raw
-//     ctr_iv  = cek[16:32]                                  // raw
+// Usage:
+//   lg-ipk decrypt <file> [options]
 //
-// Both decrypt commands verify their output before reporting success: the
-// result must no longer be NCG, and for IPKs the repack is re-checked end to
-// end (valid ar/tar structure, zero NCG members left, every member that was not
-// replaced byte-identical to the input).
-//
-// Commands:
-//
-//     cache list
-//     cache add --app-id ID --sid SID --cid CID --cek-b64 B64 [--source TXT]
-//     cache remove --app-id ID --cid CID
-//     decrypt-file FILE [--cid CID] [--key HEX] [--iv HEX] [--out PATH]
-//     decrypt-ipk IPK --out IPK [--app-id ID]
+// Automatically detects IPK archives and individual NCG files by their contents.
+// --output is required for IPKs; individual NCG files default to stdout.
+// --cid only applies to individual NCG files. --key and --iv must be provided
+// together, each containing exactly 32 hexadecimal digits.
+// Run lg-ipk decrypt --help for all options.
 //
 // Requirements: Node.js 18+ (built-in crypto/zlib; no npm packages).
 
@@ -35,9 +29,10 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
+const { TextDecoder } = require('node:util');
 const zlib = require('node:zlib');
+const cache = require('./cache');
+const parseOptions = require('../lib/parse-options');
 
 const NCG_MAGIC = Buffer.from('NCGFILE_HEADER', 'latin1');
 
@@ -361,138 +356,46 @@ function tarWrite(members) {
 }
 
 // -----------------------------------------------------------------------------
-// CEK cache: ~/.cache/lg-ipk-download/ncg/<app_id>.json
-// -----------------------------------------------------------------------------
-
-function defaultCacheDir() {
-  const env = process.env.NCG_CACHE_DIR;
-  if (env) return path.resolve(env);
-  return path.join(os.homedir(), '.cache', 'lg-ipk-download', 'ncg');
-}
-
-function cachePath(appId, cacheDir) {
-  return path.join(cacheDir, `${appId}.json`);
-}
-
-function loadCache(appId, cacheDir) {
-  const p = cachePath(appId, cacheDir);
-  if (!fs.existsSync(p)) return { app_id: appId, entries: [] };
-  return JSON.parse(fs.readFileSync(p, 'utf8'));
-}
-
-function saveCache(doc, cacheDir) {
-  const p = cachePath(doc.app_id, cacheDir);
-  fs.mkdirSync(path.dirname(p), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(p, JSON.stringify(doc, null, 2) + '\n', { mode: 0o600 });
-}
-
-function findEntry(cid, appId, cacheDir) {
-  const candidates = [];
-  if (appId) candidates.push(appId);
-  if (fs.existsSync(cacheDir)) {
-    for (const f of fs.readdirSync(cacheDir).sort()) {
-      if (!f.endsWith('.json')) continue;
-      const stem = f.slice(0, -5);
-      if (!candidates.includes(stem)) candidates.push(stem);
-    }
-  }
-  for (const app of candidates) {
-    const doc = loadCache(app, cacheDir);
-    for (const e of doc.entries || []) {
-      if (e.cid === cid) return e;
-    }
-  }
-  return null;
-}
-
-function entryToKeyIv(entry) {
-  const cek = Buffer.from(entry.cek_b64, 'base64');
-  if (cek.length !== 32) throw new Error(`expected 32-byte CEK, got ${cek.length}`);
-  return { key: cek.subarray(0, 16), iv: cek.subarray(16, 32) };
-}
-
-// -----------------------------------------------------------------------------
 // Commands
 // -----------------------------------------------------------------------------
 
 function printableRatio(data, sample = 4096) {
   const head = data.subarray(0, sample);
   if (head.length === 0) return 0;
+  let text;
+  try {
+    // A byte-limited sample may end partway through a UTF-8 character.
+    text = new TextDecoder('utf-8', { fatal: true }).decode(head, {
+      stream: head.length < data.length
+    });
+  } catch (error) {
+    if (error.code !== 'ERR_ENCODING_INVALID_ENCODED_DATA') throw error;
+    return 0;
+  }
   let ok = 0;
-  for (const b of head) if ((b >= 32 && b < 127) || b === 9 || b === 10 || b === 13) ok++;
-  return ok / head.length;
+  let total = 0;
+  for (const character of text) {
+    const code = character.codePointAt(0);
+    if ((code >= 32 && (code < 127 || code > 159)) ||
+        code === 9 || code === 10 || code === 13) ok++;
+    total++;
+  }
+  return total === 0 ? 0 : ok / total;
 }
 
 const pct = f => `${Math.round(f * 100)}%`;
-
-function cmdCacheList(args) {
-  const cacheDir = args.cacheDir;
-  if (!fs.existsSync(cacheDir)) {
-    console.log(`(no cache at ${cacheDir})`);
-    return 0;
-  }
-  let any = false;
-  for (const f of fs.readdirSync(cacheDir).sort()) {
-    if (!f.endsWith('.json')) continue;
-    const doc = JSON.parse(fs.readFileSync(path.join(cacheDir, f), 'utf8'));
-    for (const e of doc.entries || []) {
-      any = true;
-      console.log(`${doc.app_id}\t sid=${e.sid || ''}\t cid=${e.cid || ''}\t ` +
-        `obtained=${e.obtained_at || '?'}`);
-    }
-  }
-  if (!any) console.log(`(cache dir ${cacheDir} is empty)`);
-  return 0;
-}
-
-function cmdCacheAdd(args) {
-  const cek = Buffer.from(args['cek-b64'], 'base64');
-  if (cek.length !== 32) {
-    console.error(`error: --cek-b64 decodes to ${cek.length} bytes, expected 32`);
-    return 2;
-  }
-  const doc = loadCache(args['app-id'], args.cacheDir);
-  const entry = {
-    sid: args.sid,
-    cid: args.cid,
-    cek_b64: args['cek-b64'],
-    key_hex: cek.subarray(0, 16).toString('hex'),
-    iv_hex: cek.subarray(16, 32).toString('hex'),
-    source: args.source || 'manual',
-    obtained_at: args.date || 'unknown',
-  };
-  doc.entries = (doc.entries || []).filter(
-    e => !(e.cid === args.cid && e.sid === args.sid));
-  doc.entries.push(entry);
-  saveCache(doc, args.cacheDir);
-  console.log(`cached ${args['app-id']} sid=${args.sid} cid=${args.cid}`);
-  return 0;
-}
-
-function cmdCacheRemove(args) {
-  const doc = loadCache(args['app-id'], args.cacheDir);
-  const before = (doc.entries || []).length;
-  doc.entries = (doc.entries || []).filter(e => e.cid !== args.cid);
-  if (doc.entries.length === before) {
-    console.log(`no entry with cid=${args.cid} for ${args['app-id']}`);
-    return 1;
-  }
-  saveCache(doc, args.cacheDir);
-  console.log(`removed cid=${args.cid} from ${args['app-id']}`);
-  return 0;
-}
 
 function resolveKeyIv(args, cid) {
   if (args.key && args.iv) {
     return { key: Buffer.from(args.key, 'hex'), iv: Buffer.from(args.iv, 'hex') };
   }
-  const entry = findEntry(cid, args['app-id'] || null, args.cacheDir);
+  const entry = cache.findEntry(cid, args['app-id'] || null, args.cacheDir);
   if (!entry) {
-    console.error(`error: no cached CEK for cid=${cid}; run \`cache add\` first ` +
+    console.error(`error: no cached CEK for cid=${cid}; run \`lg-ipk cache add\` first ` +
       `(or pass --key/--iv)`);
     return null;
   }
-  return entryToKeyIv(entry);
+  return cache.entryToKeyIv(entry);
 }
 
 function cmdDecryptFile(args) {
@@ -675,119 +578,71 @@ function verifyRepacked(outPath, inMembers, replacedNames) {
 // CLI
 // -----------------------------------------------------------------------------
 
-const COMMANDS = {
-  'cache list': {},
-  'cache add': { required: ['app-id', 'sid', 'cid', 'cek-b64'],
-    optional: ['source', 'date'] },
-  'cache remove': { required: ['app-id', 'cid'] },
-  'decrypt-file': { positional: 'file',
-    optional: ['cid', 'key', 'iv', 'out'] },
-  'decrypt-ipk': { positional: 'ipk', required: ['out'],
-    optional: ['app-id'] },
-};
+const help = `Usage: lg-ipk decrypt <file> [options]
 
-function usage() {
-  console.error(`usage: ncg-decrypt [--cache-dir DIR]
-    cache list
-    cache add --app-id ID --sid SID --cid CID --cek-b64 B64 [--source TXT] [--date D]
-    cache remove --app-id ID --cid CID
-    decrypt-file FILE [--cid CID] [--key HEX] [--iv HEX] [--out PATH]
-    decrypt-ipk IPK --out IPK [--app-id ID]`);
-}
+Automatically detects IPK archives and individual NCG files by their contents.
 
-function parseArgs(argv) {
-  const args = { cacheDir: defaultCacheDir() };
-  let cmd = '';
-  let i = 0;
-  while (i < argv.length) {
-    const a = argv[i];
-    if (a === '--cache-dir') {
-      args.cacheDir = argv[++i] ?? '';
-    } else if (a.startsWith('--')) {
-      const eq = a.indexOf('=');
-      const name = eq === -1 ? a.slice(2) : a.slice(2, eq);
-      let val;
-      if (eq !== -1) {
-        val = a.slice(eq + 1);
-      } else {
-        val = argv[++i];
-        if (val === undefined || (val.startsWith('--') && val !== '--')) {
-          usage();
-          process.exit(2);
-        }
-      }
-      if (cmd === '' && !COMMANDS['cache add'].optional.includes(name) &&
-          name !== 'app-id' && name !== 'sid' && name !== 'cid' &&
-          name !== 'cek-b64') {
-        usage();
-        process.exit(2);
-      }
-      args[name] = val;
-    } else {
-      if (cmd === '' && (a === 'cache' || a === 'decrypt-file' || a === 'decrypt-ipk')) {
-        cmd = a;
-        if (a === 'cache') cmd = 'cache ' + (argv[++i] ?? '');
-      } else if (cmd === 'cache list' || cmd === 'cache add' ||
-                 cmd === 'cache remove') {
-        usage();
-        process.exit(2);
-      } else {
-        const spec = COMMANDS[cmd];
-        if (spec && spec.positional && !args[spec.positional]) {
-          args[spec.positional] = a;
-        } else {
-          usage();
-          process.exit(2);
-        }
-      }
-    }
-    i++;
+Options:
+  -o, --output <path>       Output path (required for IPKs; NCG defaults to stdout)
+      --app-id <id>         Restrict cached CEK lookup to this app
+      --cid <cid>           Require this content ID for a single NCG file
+      --key <hex>           AES key (32 hex digits; requires --iv)
+      --iv <hex>            AES IV (32 hex digits; requires --key)
+      --cache-dir <dir>     Override the CEK cache directory
+  -h, --help                Show this help
+`;
+
+function run(argv) {
+  const { options, positional } = parseOptions(argv, {
+    values: ['out', 'app-id', 'cid', 'key', 'iv', 'cache-dir'],
+    aliases: { '-o': 'out', '--output': 'out' }
+  });
+  if (!positional[0]) throw { usage: true, message: 'file is required' };
+  if (positional.length > 1) {
+    throw { usage: true, message: `unexpected argument: ${positional[1]}` };
   }
-  if (!COMMANDS[cmd]) {
-    usage();
-    process.exit(2);
+  if (Boolean(options.key) !== Boolean(options.iv)) {
+    throw { usage: true, message: '--key and --iv must be provided together' };
   }
-  const spec = COMMANDS[cmd];
-  if (spec.positional && !args[spec.positional]) {
-    usage();
-    process.exit(2);
-  }
-  for (const req of spec.required || []) {
-    if (!args[req]) {
-      console.error(`error: ${cmd} requires --${req.replace(/-/g, '-')}`);
-      usage();
-      process.exit(2);
+  for (const name of ['key', 'iv']) {
+    if (options[name] && !/^[0-9a-f]{32}$/i.test(options[name])) {
+      throw { usage: true, message: `--${name} must contain exactly 32 hexadecimal digits` };
     }
   }
-  return { cmd, args };
-}
-
-function main(argv) {
-  const { cmd, args } = parseArgs(argv);
+  const args = { ...options, file: positional[0],
+    cacheDir: options['cache-dir'] || cache.defaultCacheDir() };
+  const header = Buffer.alloc(NCG_MAGIC.length);
+  const fd = fs.openSync(args.file, 'r');
   try {
-    switch (cmd) {
-      case 'cache list': return cmdCacheList(args);
-      case 'cache add': return cmdCacheAdd(args);
-      case 'cache remove': return cmdCacheRemove(args);
-      case 'decrypt-file': return cmdDecryptFile(args);
-      case 'decrypt-ipk': return cmdDecryptIpk(args);
-    }
-  } catch (e) {
-    console.error(`error: ${e.message}`);
-    return 1;
+    fs.readSync(fd, header, 0, header.length, 0);
+  } finally {
+    fs.closeSync(fd);
   }
-  return 1;
+  if (isNcg(header)) {
+    return cmdDecryptFile(args);
+  }
+  if (header.subarray(0, AR_MAGIC.length).equals(AR_MAGIC)) {
+    if (args.cid) {
+      throw { usage: true, message: '--cid is only valid for a single NCG file' };
+    }
+    if (!args.out) {
+      throw { usage: true, message: 'decrypting an IPK requires --output' };
+    }
+    return cmdDecryptIpk({ ...args, ipk: args.file });
+  }
+  throw new Error('unsupported file format: expected an IPK or NCG file');
 }
 
 module.exports = {
-  NCG_MAGIC, TABLE,
+  help, run,
+  NCG_MAGIC, AR_MAGIC, TABLE,
   ctrXor, parseHeader, seedFor, decryptPayload,
   arRead, arWrite, arMemberName, isNcg,
   tarRead, tarWrite,
-  defaultCacheDir, loadCache, saveCache, findEntry, entryToKeyIv,
   printableRatio, verifyRepacked,
+  decryptFile: cmdDecryptFile, decryptIpk: cmdDecryptIpk,
 };
 
 if (require.main === module) {
-  process.exit(main(process.argv.slice(2)));
+  require('../bin/lg-ipk').run(['decrypt', ...process.argv.slice(2)]);
 }

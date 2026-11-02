@@ -37,9 +37,13 @@ ares-setup-device --list
 Once the package is published on npm:
 
 ```bash
-npm install --global lg-ipk-download
-lg-ipk-download --help
+npm install --global lg-ipk
+lg-ipk --help
 ```
+
+All commands use the `lg-ipk` entry point: `download`, `search`, `decrypt`,
+`fetch-cek`, and `cache`. `lg-ipk --help` shows a command summary and common
+examples. Use `lg-ipk <command> --help` for that command's detailed options.
 
 The npm release includes the TV-native ARM addon used by `--fetch-cek`.
 When running from a source checkout, build it with `ncg/build.sh` first
@@ -48,23 +52,23 @@ When running from a source checkout, build it with `ncg/build.sh` first
 ## Quick start
 
 ```bash
-lg-ipk-download \
+lg-ipk download \
   --device tv \
   --output /tmp/com.palmdts.devmode.ipk \
   com.palmdts.devmode
 ```
 
-The positional argument can be either:
+The `download` subcommand accepts either an internal app ID or a numeric store ID:
 
 ```bash
 # Internal Content Store app ID
-lg-ipk-download com.palmdts.devmode
+lg-ipk download com.palmdts.devmode
 
 # Numeric ID from the LG Apps website (US by default)
-lg-ipk-download 232503
+lg-ipk download 232503
 
 # Select another store country for both website lookup and TV requests
-lg-ipk-download --country DE 232503
+lg-ipk download --country DE 232503
 ```
 
 See [Country codes](#country-codes).
@@ -90,8 +94,8 @@ Search the TV's app store by keyword or internal ID without downloading or
 installing anything:
 
 ```bash
-lg-ipk-download search "Developer Mode"
-lg-ipk-download search "Developer Mode" --country DE
+lg-ipk search "Developer Mode"
+lg-ipk search "Developer Mode" --country DE
 ```
 
 Results include each matching app's name and internal ID. Searches require
@@ -102,7 +106,7 @@ Search runs on LG's servers and may include related apps.
 
 ```text
 -o, --output <path>       Local output path
--d, --device <name>       ares-setup-device profile name
+-d, --device <profile>    ares-setup-device profile
     --country <code>      Store country/region (e.g. US, DE, CN)
     --api-version <ver>   SDP API version (default: 10.0.0)
     --timeout <seconds>   Download timeout (default: 180)
@@ -118,7 +122,7 @@ Search runs on LG's servers and may include related apps.
 Machine-readable example:
 
 ```bash
-lg-ipk-download --json com.palmdts.devmode
+lg-ipk download --json com.palmdts.devmode
 ```
 
 ## Country codes
@@ -159,7 +163,7 @@ every download also writes a decrypted, installable copy next to the original
 kept and the tool prints how to obtain one. `--no-decrypt` skips the step.
 
 With `--fetch-cek`, a missing CEK is obtained during the download itself: one
-live RO exchange (the same call `ncg/fetch-cek.js` makes) runs on your TV,
+live RO exchange (the same call as `lg-ipk fetch-cek`) runs on your TV,
 the CEK is cached, and the decryption is retried. Each exchange is a real
 request to LG's service — keep it rare. The exchange looks the app's license
 up in the TV's current store region; if the app only exists in another
@@ -169,19 +173,19 @@ region's store, pass `--country <code>` (the download command forwards its own
 ```bash
 # one-time: cache the app's CEK. One command (TV-native exchange: the TV's own
 # libncg_agent.so in a single node process, SDX headers never leave the TV):
-#   ncg-fetch-cek --app-id com.example.foo --ipk com.example.foo_1.2.3.ipk
-ncg-decrypt cache add \
+#   lg-ipk fetch-cek --app-id com.example.foo --ipk com.example.foo_1.2.3.ipk
+lg-ipk cache add \
   --app-id com.example.foo --sid 50000001 \
   --cid 00112233445566778899AABBCCDDEEFF \
   --cek-b64 '<from the RO response>' --date 2026-10-30
 
 # then every download is decrypted automatically:
-lg-ipk-download --device tv com.example.foo
+lg-ipk download --device tv com.example.foo
 # -> com.example.foo_1.2.3.ipk and com.example.foo_1.2.3_dec.ipk
 
 # or decrypt manually / later, e.g. right after the CEK gets cached:
-ncg-decrypt decrypt-ipk \
-  com.example.foo_1.2.3.ipk --out /tmp/com.example.foo_1.2.3_dec.ipk \
+lg-ipk decrypt \
+  com.example.foo_1.2.3.ipk --output /tmp/com.example.foo_1.2.3_dec.ipk \
   --app-id com.example.foo
 
 # install from your computer (do not launch the app from the store)

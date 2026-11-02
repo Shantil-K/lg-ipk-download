@@ -106,7 +106,7 @@ the host:
    file through `NCG_OpenAndVerifyFile` and compares the CEK the library
    resolves for that file against the license CEK.
 5. The driver prints one JSON line (`ok`, `sid`, `cek`, `verified`); the host
-   caches the CEK with `node ncg/ncg-decrypt.js cache add`. If the driver died
+   caches the CEK with `lg-ipk cache add`. If the driver died
    before printing, the CEK is recovered from the TV library log
    `/var/log/ncgdrm-*.log` instead.
 6. Clean up `/tmp/ncgrow` (wiped on reboot anyway).
@@ -211,7 +211,7 @@ runs clean with this convention (verified 2026-10-31, RC=0).
 Store the captured value:
 
 ```bash
-node ncg/ncg-decrypt.js cache add \
+lg-ipk cache add \
   --app-id com.example.foo --sid 50000001 \
   --cid 00112233445566778899AABBCCDDEEFF \
   --cek-b64 '<value>' --source 'one live exchange 2026-10-30' --date 2026-10-30
