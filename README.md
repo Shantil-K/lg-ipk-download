@@ -21,7 +21,7 @@ NCG-protected apps are decrypted automatically after download.
 ## Requirements
 
 - An LG webOS TV with Developer Mode and SSH enabled
-- Node.js on your computer
+- Node.js 18+ on your computer
 - `ares-setup-device` from the webOS CLI
 - `expect`, `ssh`, and `scp`
 - macOS, Linux, or Windows WSL2
@@ -32,12 +32,23 @@ Configure the TV with `ares-setup-device` first, then verify it is listed:
 ares-setup-device --list
 ```
 
+## Install
+
+Once the package is published on npm:
+
+```bash
+npm install --global lg-ipk-download
+lg-ipk-download --help
+```
+
+The npm release includes the TV-native ARM addon used by `--fetch-cek`.
+When running from a source checkout, build it with `ncg/build.sh` first
+(requires Docker).
+
 ## Quick start
 
 ```bash
-cd lg-ipk-download
-
-./bin/lg-ipk-download.js \
+lg-ipk-download \
   --device tv \
   --output /tmp/com.palmdts.devmode.ipk \
   com.palmdts.devmode
@@ -47,13 +58,13 @@ The positional argument can be either:
 
 ```bash
 # Internal Content Store app ID
-./bin/lg-ipk-download.js com.palmdts.devmode
+lg-ipk-download com.palmdts.devmode
 
 # Numeric ID from the LG Apps website (US by default)
-./bin/lg-ipk-download.js 232503
+lg-ipk-download 232503
 
 # Select another store country for both website lookup and TV requests
-./bin/lg-ipk-download.js --country DE 232503
+lg-ipk-download --country DE 232503
 ```
 
 See [Country codes](#country-codes).
@@ -79,8 +90,8 @@ Search the TV's app store by keyword or internal ID without downloading or
 installing anything:
 
 ```bash
-./bin/lg-ipk-download.js search "Developer Mode"
-./bin/lg-ipk-download.js search "Developer Mode" --country DE
+lg-ipk-download search "Developer Mode"
+lg-ipk-download search "Developer Mode" --country DE
 ```
 
 Results include each matching app's name and internal ID. Searches require
@@ -107,7 +118,7 @@ Search runs on LG's servers and may include related apps.
 Machine-readable example:
 
 ```bash
-./bin/lg-ipk-download.js --json com.palmdts.devmode
+lg-ipk-download --json com.palmdts.devmode
 ```
 
 ## Country codes
@@ -158,19 +169,18 @@ region's store, pass `--country <code>` (the download command forwards its own
 ```bash
 # one-time: cache the app's CEK. One command (TV-native exchange: the TV's own
 # libncg_agent.so in a single node process, SDX headers never leave the TV):
-#   ncg/build.sh          # once, needs docker
-#   node ncg/fetch-cek.js --app-id com.example.foo --ipk com.example.foo_1.2.3.ipk
-node ncg/ncg-decrypt.js cache add \
+#   ncg-fetch-cek --app-id com.example.foo --ipk com.example.foo_1.2.3.ipk
+ncg-decrypt cache add \
   --app-id com.example.foo --sid 50000001 \
   --cid 00112233445566778899AABBCCDDEEFF \
   --cek-b64 '<from the RO response>' --date 2026-10-30
 
 # then every download is decrypted automatically:
-./bin/lg-ipk-download.js --device tv com.example.foo
+lg-ipk-download --device tv com.example.foo
 # -> com.example.foo_1.2.3.ipk and com.example.foo_1.2.3_dec.ipk
 
 # or decrypt manually / later, e.g. right after the CEK gets cached:
-node ncg/ncg-decrypt.js decrypt-ipk \
+ncg-decrypt decrypt-ipk \
   com.example.foo_1.2.3.ipk --out /tmp/com.example.foo_1.2.3_dec.ipk \
   --app-id com.example.foo
 
@@ -178,8 +188,11 @@ node ncg/ncg-decrypt.js decrypt-ipk \
 ares-install /tmp/com.example.foo_1.2.3_dec.ipk --device tv
 ```
 
-The CEK is deterministic per app build and cached under `cache/ncg/`
-(gitignored), so repeated work needs no TV or LG access. Keep right object
+The CEK is deterministic per app build and cached under
+`~/.cache/lg-ipk-download/ncg/`, shared across installations and upgrades.
+Set `NCG_CACHE_DIR` to override it; the offline tool also accepts `--cache-dir`.
+Relative overrides resolve from the directory where you invoke the command.
+Repeated work needs no TV or LG access. Keep right object
 exchanges rare — frequent requests risk the device being blocked. Details:
 [ncg/README.md](ncg/README.md), the RO protocol
 ([ro-protocol.md](docs/ro-protocol.md)), and the NCG format and payload

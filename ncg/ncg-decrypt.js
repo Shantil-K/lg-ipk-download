@@ -7,7 +7,7 @@
 // key (CEK) that the TV normally fetches from LG's Right Object service and
 // keeps in a device-bound license store. This tool decrypts the payload
 // offline. It needs the CEK once per content id (cid); the CEK is obtained with
-// the RO exchange (see docs/ro-protocol.md) and cached under cache/ncg/.
+// the RO exchange (see docs/ro-protocol.md) and cached in the user's home.
 //
 // Key material derivation (verified on webOS 25 firmware,
 // libncg_agent.so.2.0.0; see docs/ncg-format.md):
@@ -35,6 +35,7 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const zlib = require('node:zlib');
 
@@ -360,13 +361,13 @@ function tarWrite(members) {
 }
 
 // -----------------------------------------------------------------------------
-// CEK cache: cache/ncg/<app_id>.json (gitignored, local to this machine)
+// CEK cache: ~/.cache/lg-ipk-download/ncg/<app_id>.json
 // -----------------------------------------------------------------------------
 
 function defaultCacheDir() {
   const env = process.env.NCG_CACHE_DIR;
-  if (env) return env;
-  return path.resolve(__dirname, '..', 'cache', 'ncg');
+  if (env) return path.resolve(env);
+  return path.join(os.homedir(), '.cache', 'lg-ipk-download', 'ncg');
 }
 
 function cachePath(appId, cacheDir) {
@@ -381,8 +382,8 @@ function loadCache(appId, cacheDir) {
 
 function saveCache(doc, cacheDir) {
   const p = cachePath(doc.app_id, cacheDir);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(doc, null, 2) + '\n');
+  fs.mkdirSync(path.dirname(p), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(p, JSON.stringify(doc, null, 2) + '\n', { mode: 0o600 });
 }
 
 function findEntry(cid, appId, cacheDir) {
@@ -686,7 +687,7 @@ const COMMANDS = {
 };
 
 function usage() {
-  console.error(`usage: node ncg-decrypt.js [--cache-dir DIR]
+  console.error(`usage: ncg-decrypt [--cache-dir DIR]
     cache list
     cache add --app-id ID --sid SID --cid CID --cek-b64 B64 [--source TXT] [--date D]
     cache remove --app-id ID --cid CID

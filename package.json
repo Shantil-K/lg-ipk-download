@@ -1,13 +1,40 @@
 {
   "name": "lg-ipk-download",
   "version": "0.1.0",
-  "private": true,
-  "description": "Download official LG Content Store IPKs through a webOS TV",
+  "description": "Download IPKs from the LG Content Store in any country on your computer, with automatic NCG decryption",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lennylxx/lg-ipk-download.git"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "tv/",
+    "docs/",
+    "ncg/*.js",
+    "ncg/*.c",
+    "ncg/*.h",
+    "ncg/*.sh",
+    "ncg/Dockerfile",
+    "ncg/README.md",
+    "ncg/dist/ncg_native.node"
+  ],
   "bin": {
-    "lg-ipk-download": "bin/lg-ipk-download.js"
+    "lg-ipk-download": "bin/lg-ipk-download.js",
+    "ncg-decrypt": "ncg/ncg-decrypt.js",
+    "ncg-fetch-cek": "ncg/fetch-cek.js"
   },
   "scripts": {
-    "check": "set -e; for f in bin/*.js tv/*.js ncg/*.js; do node --check \"$f\"; done"
+    "check": "bash scripts/check.sh",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": ["linux", "darwin"],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "license": "Apache-2.0"
 }

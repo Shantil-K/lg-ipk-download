@@ -247,7 +247,7 @@ function sha256File(filename) {
 }
 
 // Decrypt NCG-protected payloads of a downloaded IPK, offline. The CEK must
-// already be cached under cache/ncg/ (docs/ro-protocol.md); without it the
+// already be cached locally (docs/ro-protocol.md); without it the
 // download still succeeds and the caller prints how to obtain one. The
 // decrypted IPK is written next to the original as <name>_dec.ipk.
 // Returns { status: 'ok' | 'not-protected' | 'no-cek' | 'error',
@@ -290,6 +290,7 @@ function runFetchCek(appId, ipk, options) {
   const result = childProcess.spawnSync(process.execPath, [FETCH_CEK].concat(args), {
     cwd: ROOT,
     env: Object.assign({}, process.env, {
+      NCG_CACHE_DIR: process.env.NCG_CACHE_DIR ? path.resolve(process.env.NCG_CACHE_DIR) : '',
       TV_TIMEOUT: String(Math.max(options.timeout + 60, 120))
     }),
     encoding: 'utf8',
@@ -457,7 +458,7 @@ async function main() {
       process.stderr.write(
         `warning: NCG-protected IPK but no cached CEK for ${download.appId}; ` +
         `the IPK is kept at ${output}.\n` +
-        `warning: obtain the CEK with: node ncg/fetch-cek.js --app-id ` +
+        `warning: obtain the CEK with: ncg-fetch-cek --app-id ` +
         `${download.appId} --ipk ${shellQuote(output)}\n` +
         `warning: then re-run the download (it will decrypt automatically).\n`
       );

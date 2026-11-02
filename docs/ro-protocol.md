@@ -190,7 +190,8 @@ The request is form-urlencoded in all cases.
 
 The same (sid, cid, device) always yields the same `<cek>`. Therefore one
 exchange captures everything permanently; the CEK is then cached locally
-(`cache/ncg/`) and neither the TV nor LG is needed again.
+(`~/.cache/lg-ipk-download/ncg/`, overridden with `NCG_CACHE_DIR`) and neither
+the TV nor LG is needed again.
 
 ## 4. Capturing for the cache
 

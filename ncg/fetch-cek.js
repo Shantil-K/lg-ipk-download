@@ -78,7 +78,7 @@ function parseCli(argv) {
   const ipk = args['--ipk'] || '';
   if (!app || !ipk)
     throw { usage: true,
-            message: 'usage: ncg/fetch-cek.js --app-id <id> --ipk <encrypted.ipk> [options]' };
+            message: 'usage: ncg-fetch-cek --app-id <id> --ipk <encrypted.ipk> [options]' };
   let country = args['--country'] || '';
   if (country) {
     if (!/^(?:[A-Za-z]{2}|C01)$/i.test(country))
@@ -120,6 +120,7 @@ function main() {
   }
 
   const env = Object.assign({}, process.env);
+  if (env.NCG_CACHE_DIR) env.NCG_CACHE_DIR = m.defaultCacheDir();
   if (deviceProfile) env.TV_DEVICE = deviceProfile;
 
   function tv(...args) {
@@ -282,7 +283,7 @@ function main() {
         [path.join(__dirname, 'ncg-decrypt.js'), 'cache', 'add',
          '--app-id', app, '--sid', sid, '--cid', cid, '--cek-b64', cekB64,
          '--source', `TV-native exchange ${date}`, '--date', date],
-        { cwd: ROOT, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+        { cwd: ROOT, env, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
       if (r.stdout) process.stdout.write(r.stdout);
       if (r.stderr) process.stderr.write(r.stderr);
       if (r.status !== 0) {
@@ -297,7 +298,7 @@ function main() {
     fs.rmSync(pickDir, { recursive: true, force: true });
     cleanupRemote();
     process.stdout.write(`done. sid=${sid} cid=${cid} app=${app}\n`);
-    process.stdout.write(`next: node ncg/ncg-decrypt.js decrypt-ipk ${ipk} --out <out> --app-id ${app}\n`);
+    process.stdout.write(`next: ncg-decrypt decrypt-ipk ${ipk} --out <out> --app-id ${app}\n`);
   } catch (err) {
     if (err && err.usage) {
       process.stderr.write(`${err.message}\n`);
