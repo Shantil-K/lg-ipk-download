@@ -32,4 +32,26 @@ jobs:
       - run: npm run check
       - run: ncg/build.sh
       - run: npm test
+      - name: Check published version
+        id: published
+        run: |
+          name=$(node -p 'encodeURIComponent(require("./package.json").name)')
+          version=$(node -p 'encodeURIComponent(require("./package.json").version)')
+          status=$(curl --silent --show-error --connect-timeout 10 --max-time 30 \
+            --output /dev/null --write-out '%{http_code}' \
+            "https://registry.npmjs.org/$name/$version")
+          case "$status" in
+            200)
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              echo "Version already published; skipping npm publish."
+              ;;
+            404)
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::npm registry returned HTTP $status"
+              exit 1
+              ;;
+          esac
       - run: npm publish
+        if: steps.published.outputs.exists == 'false'
