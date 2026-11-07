@@ -23,7 +23,7 @@ NCG-protected apps are decrypted automatically after download.
 - An LG webOS TV with Developer Mode and SSH enabled
 - Node.js 18+ on your computer
 - `ares-setup-device` from the webOS CLI
-- `expect`, `ssh`, and `scp`
+- `ssh` and `scp` (`expect` is only required if your TV profile uses a passphrase or password)
 - macOS, Linux, or Windows WSL2
 
 Configure the TV with `ares-setup-device` first, then verify it is listed:

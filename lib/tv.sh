@@ -23,10 +23,6 @@ command -v ares-setup-device >/dev/null 2>&1 || {
   echo "tv.sh: ares-setup-device not found" >&2
   exit 1
 }
-command -v expect >/dev/null 2>&1 || {
-  echo "tv.sh: expect not found" >&2
-  exit 1
-}
 
 info=$(ares-setup-device -F -j 2>/dev/null) || {
   echo "tv.sh: ares-setup-device failed" >&2
@@ -82,7 +78,7 @@ password=$(decode_field "$password_encoded")
 case "$key" in
   "") key_path="" ;;
   /*) key_path="$key" ;;
-  *) key_path="$HOME/.ssh/$key" ;;
+  *) key_path="${HOME:-}/.ssh/$key" ;;
 esac
 
 export TV_KEY="$key_path" TV_PORT="$port" TV_HOST="$user@$ip" \
@@ -101,6 +97,37 @@ case "$action" in
     export TV_MODE=pull TV_SRC="$1" TV_DST="$2"
     ;;
 esac
+
+if ! command -v expect >/dev/null 2>&1; then
+  if [ -n "$passphrase" ] || [ -n "$password" ]; then
+    echo "tv.sh: expect not found (required when a passphrase or password is set)" >&2
+    exit 1
+  fi
+  opts=()
+  [ -n "$key_path" ] && opts+=(-i "$key_path")
+  opts+=(
+    -o "ConnectTimeout=${TV_TIMEOUT:-120}"
+    -o StrictHostKeyChecking=no
+    -o UserKnownHostsFile=/dev/null
+    -o LogLevel=ERROR
+    -o ControlMaster=auto
+    -o ControlPersist=60
+    -o ControlPath="$TV_CONTROL_PATH"
+    -o HostKeyAlgorithms=+ssh-rsa
+    -o PubkeyAcceptedKeyTypes=+ssh-rsa
+  )
+  case "$action" in
+    run)
+      exec ssh -p "$port" "${opts[@]}" "$user@$ip" "$1"
+      ;;
+    push)
+      exec scp -P "$port" "${opts[@]}" "$1" "$user@$ip:$2"
+      ;;
+    pull)
+      exec scp -P "$port" "${opts[@]}" "$user@$ip:$1" "$2"
+      ;;
+  esac
+fi
 
 expect <<'EOF'
 set timeout $env(TV_TIMEOUT)

@@ -20,8 +20,8 @@
 //   5. cache the CEK locally (lg-ipk cache add)
 //   6. clean up /tmp/ncgrow on the TV (it is also wiped on reboot)
 //
-// Prerequisites: ares-setup-device + expect (same as lib/tv.sh), and a
-// prebuilt addon:
+// Prerequisites: ares-setup-device + ssh/scp (and expect if a passphrase
+// or password is set), and a prebuilt addon:
 //   ncg/build.sh
 //
 // Usage:

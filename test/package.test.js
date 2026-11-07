@@ -364,3 +364,54 @@ if (e.TV_MODE === 'push') {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
 });
+
+test('tv transport runs direct ssh/scp when expect is absent and no passphrase is set', () => {
+  const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'lg-ipk-tv-test-')));
+  try {
+    const mockBin = path.join(temporary, 'mock-bin');
+    fs.mkdirSync(mockBin);
+    const executable = (name, code) => fs.writeFileSync(path.join(mockBin, name),
+      `#!${process.execPath}\n${code}`, { mode: 0o755 });
+    executable('ares-setup-device', `
+console.log(JSON.stringify([{
+  name: 'passwordless', default: true,
+  deviceinfo: { ip: '127.0.0.1', port: 22, user: 'smoke' },
+  details: { privatekey: 'unused-key' }
+}]));
+`);
+    executable('ssh', `
+console.log('mock-ssh:' + process.argv.slice(2).join(' '));
+`);
+    executable('scp', `
+console.log('mock-scp:' + process.argv.slice(2).join(' '));
+`);
+    const tvScript = path.join(ROOT, 'lib', 'tv.sh');
+    const env = {
+      ...process.env,
+      HOME: temporary,
+      PATH: [mockBin, path.dirname(process.execPath), '/bin', '/usr/bin'].join(path.delimiter)
+    };
+    const runTv = (action, ...args) => {
+      const res = spawnSync(tvScript, [action, ...args], { env, encoding: 'utf8' });
+      assert.equal(res.status, 0, res.stderr);
+      return res.stdout.trim();
+    };
+    assert.match(runTv('run', 'echo test'), /^mock-ssh:/);
+    assert.match(runTv('push', 'src', 'dst'), /^mock-scp:/);
+    assert.match(runTv('pull', 'src', 'dst'), /^mock-scp:/);
+
+    executable('ares-setup-device', `
+console.log(JSON.stringify([{
+  name: 'with-passphrase', default: true,
+  deviceinfo: { ip: '127.0.0.1', port: 22, user: 'smoke' },
+  details: { privatekey: 'unused-key', passphrase: 'secret-passphrase' }
+}]));
+`);
+    const failRes = spawnSync(tvScript, ['run', 'echo test'], { env, encoding: 'utf8' });
+    assert.equal(failRes.status, 1);
+    assert.match(failRes.stderr, /expect not found \(required when a passphrase or password is set\)/);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
