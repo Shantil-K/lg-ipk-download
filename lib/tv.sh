@@ -106,6 +106,7 @@ if ! command -v expect >/dev/null 2>&1; then
   opts=()
   [ -n "$key_path" ] && opts+=(-i "$key_path")
   opts+=(
+    -o BatchMode=yes
     -o "ConnectTimeout=${TV_TIMEOUT:-120}"
     -o StrictHostKeyChecking=no
     -o UserKnownHostsFile=/dev/null

@@ -385,20 +385,24 @@ console.log('mock-ssh:' + process.argv.slice(2).join(' '));
     executable('scp', `
 console.log('mock-scp:' + process.argv.slice(2).join(' '));
 `);
+    // Expose only node and bash so a host-installed expect is never found.
+    fs.symlinkSync(process.execPath, path.join(mockBin, 'node'));
+    const bash = execFileSync('/bin/sh', ['-c', 'command -v bash'], { encoding: 'utf8' }).trim();
+    fs.symlinkSync(bash, path.join(mockBin, 'bash'));
     const tvScript = path.join(ROOT, 'lib', 'tv.sh');
     const env = {
       ...process.env,
       HOME: temporary,
-      PATH: [mockBin, path.dirname(process.execPath), '/bin', '/usr/bin'].join(path.delimiter)
+      PATH: mockBin
     };
     const runTv = (action, ...args) => {
       const res = spawnSync(tvScript, [action, ...args], { env, encoding: 'utf8' });
       assert.equal(res.status, 0, res.stderr);
       return res.stdout.trim();
     };
-    assert.match(runTv('run', 'echo test'), /^mock-ssh:/);
-    assert.match(runTv('push', 'src', 'dst'), /^mock-scp:/);
-    assert.match(runTv('pull', 'src', 'dst'), /^mock-scp:/);
+    assert.match(runTv('run', 'echo test'), /^mock-ssh:.* -o BatchMode=yes .*smoke@127\.0\.0\.1 echo test$/);
+    assert.match(runTv('push', 'src', 'dst'), /^mock-scp:.* -o BatchMode=yes .* src smoke@127\.0\.0\.1:dst$/);
+    assert.match(runTv('pull', 'src', 'dst'), /^mock-scp:.* -o BatchMode=yes .* smoke@127\.0\.0\.1:src dst$/);
 
     executable('ares-setup-device', `
 console.log(JSON.stringify([{
